@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -45,10 +46,15 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+char c;
 char msg[250];
+int Char_Received = 0;
 volatile uint32_t counter = 0;
 char invalid[15] = "Invalid Input ";
-int UART_Receive_signal = 0;
+int risingEdge = 0;
+int pin = 0;
+int previousPin = 0;
+char systickStr[11];
 
 /* USER CODE END PV */
 
@@ -61,7 +67,7 @@ void DelayMS(unsigned int time);
 void UART_Tx(char chat);
 char UART_Rx(void);
 void UART_Send(char str[]);
-void UART_Receive(char str[]);
+void UART_Receive(char str[], char* receivedChar);
 void str_empty (char str[]);
 int debounceSwitch(int pin);
 int detectedRisingEdge(int currPin, int *prevousPin);
@@ -69,7 +75,7 @@ void intToString(uint32_t value, char str[]);
 void reverseString(char str[], int length);
 void UART_ISR(int Rx, int LED, char strrx[]);
 void LED_Control (char str[]);
-int UART_MessageAvailable(void);
+int msgReady(char msg[]);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -115,7 +121,7 @@ int main(void)
   GPIOC->MODER |= GPIO_MODER_MODER8_0; //Set bit 0 to 1 Orange
   GPIOC->MODER |= GPIO_MODER_MODER9_0; //Set bit 0 to 1 Green
 
-  /*----- GPIOA INIT -----*/
+  /*----- USER Switch INIT -----*/
 
   // Enabling Clock for Port A
   RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
@@ -123,8 +129,16 @@ int main(void)
   GPIOA->MODER &= 0xfffffffc;
   // Setting the speed of the pin PA0 to High Speed
   GPIOA->OSPEEDR |= 0x00000003;
-  // Enabling Pull Up for PA0
+  // Enabling Pull Down for PA0
   GPIOA->PUPDR |= 0x00000002;
+
+//  // Configure EXTI Line 0 for PA0 with a rising edge trigger
+//  EXTI->IMR |= EXTI_IMR_MR0; // Enable interrupt on line 0
+//  EXTI->RTSR |= EXTI_RTSR_TR0; // Trigger on rising edge
+
+  // Enable EXTI0_1_IRQn (EXTI Line 0 and 1) in the NVIC
+  NVIC_EnableIRQ(EXTI0_1_IRQn);
+  NVIC_SetPriority(EXTI0_1_IRQn, 0);
 
 
   /* ----- USART1 INIT ----- */
@@ -146,7 +160,7 @@ int main(void)
 
 
   // Enabling UART Transmit
-  USART1->CR1 |= USART_CR1_TE ;
+  USART1->CR1 |= USART_CR1_TE;
   // Enabling UART Receive
   USART1->CR1 |= USART_CR1_RXNEIE | USART_CR1_RE;
   // Enabling UART
@@ -159,11 +173,6 @@ int main(void)
 
 
   /* USER CODE END 2 */
-
-  int risingEdge = 0;
-  int pin = 0;
-  int previousPin = 0;
-  char systickStr[11];
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
@@ -173,19 +182,29 @@ int main(void)
 
 	  // Reading if Switch is pressed and debouncing
 
-	  pin = GPIOA->IDR & 0x00000001;
-	  pin = debounceSwitch(pin);
+//	  pin = GPIOA->IDR & 0x00000001;
+//	  pin = debounceSwitch(pin);
+//
+//	  // Sending SysTick Value
+//	  risingEdge = detectedRisingEdge(pin, &previousPin);
+//	  if (risingEdge){
+//		  uint32_t systickValue = counter;
+//		  intToString(systickValue, systickStr);
+//		  UART_Send(systickStr);
+//	  }else{
+//	  	  str_empty(systickStr);
+//	  }
+//	  str_empty(systickStr);
 
-	  // Sending SysTick Value
-	  risingEdge = detectedRisingEdge(pin, &previousPin);
-	  if (risingEdge){
-		  uint32_t systickValue = counter;
-		  intToString(systickValue, systickStr);
-		  UART_Send(systickStr);
-	  }else{
-	  	  str_empty(systickStr);
+	  if (Char_Received){
+		  UART_Receive(msg,&c);
+		  Char_Received=0;
+//		  UART_Send(msg);
+		  if (msgReady(msg)){
+			  LED_Control(msg);
+		  }
+
 	  }
-	  str_empty(systickStr);
 
 
 
@@ -194,6 +213,7 @@ int main(void)
 
   /* USER CODE END WHILE */
 }
+
 
 /**
   * @brief System Clock Configuration
@@ -233,19 +253,32 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
+//void EXTI0_1_IRQHandler(void) {
+//    if (EXTI->PR & EXTI_PR_PR0) { // Check if EXTI Line 0 triggered the interrupt
+//
+//    	uint32_t systickValue = counter;
+//		intToString(systickValue, systickStr);
+//		UART_Send(systickStr);
+//		str_empty(systickStr);
+//
+//        EXTI->PR = EXTI_PR_PR0; // Clear the interrupt pending bit by writing '1' to it
+//    }
+//}
 
 void USART1_IRQHandler(void){
-	UART_ISR(1,1,msg);
+	c = UART_Rx();
+	Char_Received = 1;
 }
 
-void UART_ISR(int Rx, int LED, char strrx[]){
-	if (Rx){
-		UART_Receive(strrx);
-	}
-	if (LED){
-		LED_Control(strrx);
-	}
-
+int msgReady(char msg[]){
+	int length = 6;
+	int check = 0;
+    if (strlen(msg) == length) {
+        if (msg[length - 1] == '\0') {
+        	check = 1;
+        }
+    }
+    return check;
 }
 
 void LED_Control (char str[]){
@@ -266,7 +299,7 @@ void LED_Control (char str[]){
 			GPIOC->ODR &= 0xfffffdff; //Green LED off
 			while (i<20){
 				GPIOC->ODR ^= 0x000003c0;
-				DelayMS(100);
+				DelayMS(100);   // Change this delay and while loops to ifs
 				i++;
 			}
 		 }else{
@@ -377,17 +410,17 @@ void UART_Send(char str[]){
 	}
 }
 
-void UART_Receive(char str[]) {
+void UART_Receive(char str[], char* receivedChar) {
     int counter = 0;
     int signal = 0;
 
     while (signal == 0) {
-        char receivedChar = UART_Rx();
-        if (receivedChar == '\n' || receivedChar == '\r' || receivedChar == '\0') {
+        if (*receivedChar == '\n' || *receivedChar == '\r' || *receivedChar == '\0' || counter>=5) {
         	str[counter] = '\0';
             signal = 1;
-        } else {
-            str[counter] = receivedChar;
+        }else{
+            str[counter] = *receivedChar;
+            *receivedChar = '\0';
             counter++;
         }
     }
