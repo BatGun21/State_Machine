@@ -46,15 +46,17 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-char c;
+
 char msg[250];
-int Char_Received = 0;
+int msgIndex = 0;
 volatile uint32_t counter = 0;
 char invalid[15] = "Invalid Input ";
-int risingEdge = 0;
-int pin = 0;
-int previousPin = 0;
-char systickStr[11];
+//int risingEdge = 0;
+//int pin = 0;
+//int previousPin = 0;
+//char systickStr[11];
+
+
 
 /* USER CODE END PV */
 
@@ -73,9 +75,10 @@ int debounceSwitch(int pin);
 int detectedRisingEdge(int currPin, int *prevousPin);
 void intToString(uint32_t value, char str[]);
 void reverseString(char str[], int length);
-void UART_ISR(int Rx, int LED, char strrx[]);
 void LED_Control (char str[]);
 int msgReady(char msg[]);
+void UART_ISR(char str[]);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -196,15 +199,12 @@ int main(void)
 //	  }
 //	  str_empty(systickStr);
 
-	  if (Char_Received){
-		  UART_Receive(msg,&c);
-		  Char_Received=0;
-//		  UART_Send(msg);
-		  if (msgReady(msg)){
-			  LED_Control(msg);
-		  }
-
+	  if (msgReady(msg)){
+		  UART_Send(msg);
+		  LED_Control(msg);
+		  str_empty(msg);
 	  }
+
 
 
 
@@ -266,9 +266,28 @@ void SystemClock_Config(void)
 //}
 
 void USART1_IRQHandler(void){
-	c = UART_Rx();
-	Char_Received = 1;
+	UART_ISR(msg);
 }
+
+void UART_ISR(char str[]){
+	char c;
+	c = UART_Rx();
+    if ((c == '\n' || c == '\r' || c == '\0') && (msgIndex < 5)) {
+    	str_empty(str);
+    	msgIndex = 0;
+    	UART_Send(invalid);
+    }else if ((c == '\n' || c == '\r' || c == '\0') && (msgIndex == 5)){
+    	str[msgIndex] = '\0';
+    	msgIndex = 0;
+    }else if (msgIndex>=5){
+    	str[5] = '\0';
+    	msgIndex = 0;
+    }else while (msgIndex < 5){
+    	str[msgIndex] = c;
+    	msgIndex++;
+    }
+}
+
 
 int msgReady(char msg[]){
 	int length = 6;
@@ -305,7 +324,6 @@ void LED_Control (char str[]){
 		 }else{
 			UART_Send(invalid);
 		 }
-		  str_empty(str);
 }
 
 void SysTick_Handler(void) {
@@ -410,21 +428,22 @@ void UART_Send(char str[]){
 	}
 }
 
-void UART_Receive(char str[], char* receivedChar) {
-    int counter = 0;
-    int signal = 0;
 
-    while (signal == 0) {
-        if (*receivedChar == '\n' || *receivedChar == '\r' || *receivedChar == '\0' || counter>=5) {
-        	str[counter] = '\0';
-            signal = 1;
-        }else{
-            str[counter] = *receivedChar;
-            *receivedChar = '\0';
-            counter++;
-        }
-    }
-}
+//void UART_Receive(char str[], char* receivedChar) {
+//    int counter = 0;
+//    int signal = 0;
+//
+//    while (signal == 0) {
+//        if (*receivedChar == '\n' || *receivedChar == '\r' || *receivedChar == '\0' || counter>=5) {
+//        	str[counter] = '\0';
+//            signal = 1;
+//        }else{
+//            str[counter] = *receivedChar;
+//            *receivedChar = '\0';
+//            counter++;
+//        }
+//    }
+//}
 
 void DelayMS(unsigned int time){
 
