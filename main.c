@@ -49,13 +49,15 @@
 
 char msg[250];
 int msgIndex = 0;
+char temp_msg[250];
+int temp_msg_index = 0;
 volatile uint32_t counter = 0;
 char invalid[15] = "Invalid Input ";
-int msgRead = 0;
-//int risingEdge = 0;
-//int pin = 0;
-//int previousPin = 0;
-//char systickStr[11];
+int msgReady = 0;
+int risingEdge = 0;
+int pin = 0;
+int previousPin = 0;
+char systickStr[11];
 
 
 
@@ -76,9 +78,8 @@ int debounceSwitch(int pin);
 int detectedRisingEdge(int currPin, int *prevousPin);
 void intToString(uint32_t value, char str[]);
 void reverseString(char str[], int length);
-int msgReady(char msg[]);
+void LED_Control (char str[]);
 void UART_ISR(char str[], int* index);
-void LED_Control (char str[], int* index);
 
 /* USER CODE END PFP */
 
@@ -136,11 +137,11 @@ int main(void)
   // Enabling Pull Down for PA0
   GPIOA->PUPDR |= 0x00000002;
 
-//  // Configure EXTI Line 0 for PA0 with a rising edge trigger
-//  EXTI->IMR |= EXTI_IMR_MR0; // Enable interrupt on line 0
-//  EXTI->RTSR |= EXTI_RTSR_TR0; // Trigger on rising edge
+  // Configure EXTI Line 0 for PA0 with a rising edge trigger
+  EXTI->IMR |= EXTI_IMR_MR0; // Enable interrupt on line 0
+  EXTI->RTSR |= EXTI_RTSR_TR0; // Trigger on rising edge
 
-  // Enable EXTI0_1_IRQn (EXTI Line 0 and 1) in the NVIC
+//   Enable EXTI0_1_IRQn (EXTI Line 0 and 1) in the NVIC
   NVIC_EnableIRQ(EXTI0_1_IRQn);
   NVIC_SetPriority(EXTI0_1_IRQn, 0);
 
@@ -200,10 +201,15 @@ int main(void)
 //	  }
 //	  str_empty(systickStr);
 
-//	  if (msgIndex==5){
-//		  LED_Control(msg, &msgIndex);
-//	  }
-    /* USER CODE BEGIN 3 */
+
+
+	 if (msgReady){
+		 LED_Control(msg);
+		 msgReady = 0;
+
+	 }
+
+	  /* USER CODE BEGIN 3 */
   }
 
   /* USER CODE END WHILE */
@@ -248,63 +254,56 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
-//void EXTI0_1_IRQHandler(void) {
-//    if (EXTI->PR & EXTI_PR_PR0) { // Check if EXTI Line 0 triggered the interrupt
-//
-//    	uint32_t systickValue = counter;
-//		intToString(systickValue, systickStr);
-//		UART_Send(systickStr);
-//		str_empty(systickStr);
-//
-//        EXTI->PR = EXTI_PR_PR0; // Clear the interrupt pending bit by writing '1' to it
-//    }
-//}
+void EXTI0_1_IRQHandler(void) {
+    if (EXTI->PR & EXTI_PR_PR0) { // Check if EXTI Line 0 triggered the interrupt
+		uint32_t systickValue = counter;
+		intToString(systickValue, systickStr);
+		UART_Send(systickStr);
+        EXTI->PR = EXTI_PR_PR0; // Clear the interrupt pending bit by writing '1' to it
+    }
+}
 
 void USART1_IRQHandler(void){
-	UART_ISR(msg, &msgIndex);
+	UART_ISR(temp_msg, &temp_msg_index);
 }
 
 void UART_ISR(char str[], int* index){
+	msgReady = 0;
 	char c;
-	int signal = 0;
-	if (signal==0){
-		c = UART_Rx();
-	    if ((c == '\0') && (*index < 5)) {
-	    	str_empty(str);
-	    	*index = 0;
-	    	UART_Send("Warning: Message String too small");
-	    	signal = 1;
-	    }else if ((c == '\0') && (*index == 5)){
-	    	str[*index] = '\0';
-	    	*index = 0;
-	    	UART_Send(str); // This is just to check what I have received will remove later
-	    	signal = 2;
-	    }else if (*index>=5){
-	    	str_empty(str);
-	    	*index = 0;
-	    	UART_Send("Warning: End with null character");
-	    	signal = 1;
-	    }else if (*index < 5){
-	    	str[*index] = c;
-	    	*index = *index +1;
-	    	signal = 0;
-	    }
-	}
-}
+	c = UART_Rx();
+    if ((c == '\n' || c == '\r' || c == '\0') && (*index < 5)) {
+    	UART_Send("Warning: Message String too small ");
+    	str_empty(str);
+    	*index = 0;
+    	msgReady = 0;
+    }else if (*index < 5){
+    	str[*index] = c;
+    	*index = *index +1;
+    	msgReady = 0;
+    }else if ((c == '\n' || c == '\r' || c == '\0') && (*index == 5)){
+    	str[*index] = '\0';
+    	strcpy(msg,temp_msg);
+    	msgReady = 1;
+    	str_empty(str);
+    	*index = 0;
+    }else if ((*index>=5)&&(c!='\0')){
+    	str[*index] = c;
+    	*index = *index +1;
+    	msgReady = 0;
+    	UART_Send("Warning: End with Null Character ");
+    	UART_Send(str);
 
-
-int msgReady(char msg[]){
-	int length = 6;
-	int check = 0;
-    if (strlen(msg) == length) {
-        if (msg[length - 1] == '\0') {
-        	check = 1;
-        }
+    }else if ((*index>5)&&(c='\0')){
+    	str[*index] = '\0';
+    	msgReady = 0;
+    	UART_Send(str);
+    	str_empty(str);
+    	*index = 0;
+    	UART_Send("Warning: Message String too long ");
     }
-    return check;
 }
 
-void LED_Control (char str[], int* index){
+void LED_Control (char str[]){
 
 		// Compare the string and do the Tasks accordingly
 		if (strcmp(str, "REDSR\0") == 0){
@@ -328,8 +327,6 @@ void LED_Control (char str[], int* index){
 		 }else{
 			UART_Send(invalid);
 		 }
-		 str_empty(msg);
-		 *index=0;
 }
 
 void SysTick_Handler(void) {
