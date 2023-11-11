@@ -21,7 +21,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stdbool.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -52,13 +51,15 @@ int msgIndex = 0;
 char temp_msg[250];
 int temp_msg_index = 0;
 volatile uint32_t counter = 0;
+volatile uint32_t delay_counter = 0;
 char invalid[15] = "Invalid Input ";
 int msgReady = 0;
-int risingEdge = 0;
-int pin = 0;
-int previousPin = 0;
+int rst_msgReady = 0;
 char systickStr[11];
-
+int timerSet = 0;
+int timeCounter = 0;
+int timeComplete = 0;
+int delayms_time = 0;
 
 
 /* USER CODE END PV */
@@ -141,7 +142,7 @@ int main(void)
   EXTI->IMR |= EXTI_IMR_MR0; // Enable interrupt on line 0
   EXTI->RTSR |= EXTI_RTSR_TR0; // Trigger on rising edge
 
-//   Enable EXTI0_1_IRQn (EXTI Line 0 and 1) in the NVIC
+  // Enable EXTI0_1_IRQn (EXTI Line 0 and 1) in the NVIC
   NVIC_EnableIRQ(EXTI0_1_IRQn);
   NVIC_SetPriority(EXTI0_1_IRQn, 0);
 
@@ -170,7 +171,7 @@ int main(void)
   USART1->CR1 |= USART_CR1_RXNEIE | USART_CR1_RE;
   // Enabling UART
   USART1->CR1 |= USART_CR1_UE;
-//   Generating Interupt when data is ready to read;
+  // Generating Interupt when data is ready to read;
   USART1->CR1 |= USART_CR1_RXNEIE;
   //Enabling the Interupt Requests.
   NVIC_EnableIRQ(USART1_IRQn);
@@ -184,31 +185,11 @@ int main(void)
   while (1)
   {
 	/* USER CODE END 3 */
-
-	  // Reading if Switch is pressed and debouncing
-
-//	  pin = GPIOA->IDR & 0x00000001;
-//	  pin = debounceSwitch(pin);
-//
-//	  // Sending SysTick Value
-//	  risingEdge = detectedRisingEdge(pin, &previousPin);
-//	  if (risingEdge){
-//		  uint32_t systickValue = counter;
-//		  intToString(systickValue, systickStr);
-//		  UART_Send(systickStr);
-//	  }else{
-//	  	  str_empty(systickStr);
-//	  }
-//	  str_empty(systickStr);
-
-
-
 	 if (msgReady){
+		 rst_msgReady = 0;
 		 LED_Control(msg);
-		 msgReady = 0;
-
+		 rst_msgReady = 1;
 	 }
-
 	  /* USER CODE BEGIN 3 */
   }
 
@@ -271,6 +252,11 @@ void UART_ISR(char str[], int* index){
 	msgReady = 0;
 	char c;
 	c = UART_Rx();
+
+    if (rst_msgReady){
+    	msgReady = 0;
+    }
+
     if ((c == '\n' || c == '\r' || c == '\0') && (*index < 5)) {
     	UART_Send("Warning: Message String too small ");
     	str_empty(str);
@@ -282,24 +268,20 @@ void UART_ISR(char str[], int* index){
     	msgReady = 0;
     }else if ((c == '\n' || c == '\r' || c == '\0') && (*index == 5)){
     	str[*index] = '\0';
-    	strcpy(msg,temp_msg);
+    	strcpy(msg,str);
     	msgReady = 1;
     	str_empty(str);
     	*index = 0;
-    }else if ((*index>=5)&&(c!='\0')){
+    }else{
     	str[*index] = c;
     	*index = *index +1;
-    	msgReady = 0;
-    	UART_Send("Warning: End with Null Character ");
-    	UART_Send(str);
+    	if (c == '\0'){
+        	UART_Send("Warning: Message String too long ");
+        	str_empty(str);
+        	*index = 0;
+        	msgReady = 0;
+    	}
 
-    }else if ((*index>5)&&(c='\0')){
-    	str[*index] = '\0';
-    	msgReady = 0;
-    	UART_Send(str);
-    	str_empty(str);
-    	*index = 0;
-    	UART_Send("Warning: Message String too long ");
     }
 }
 
@@ -316,25 +298,35 @@ void LED_Control (char str[]){
 			GPIOC->ODR &= 0xfffffdff; //Green LED off
 		}else if (strcmp(str, "BLINK\0") == 0){
 			//Blinking all the LEDs Together
-			int i = 0;
-			GPIOC->ODR &= 0xffffffbf; //Red LED off
-			GPIOC->ODR &= 0xfffffdff; //Green LED off
-			while (i<20){
-				GPIOC->ODR ^= 0x000003c0;
-				DelayMS(100);   // Change this delay and while loops to ifs
-				i++;
-			}
+			DelayMS(50);
+			GPIOC->ODR ^= 0x000003c0;
+//				if (timerSet==0){
+//					GPIOC->ODR ^= 0x000003c0;
+//				}
+
+		 }else if (strcmp(str, "BLKST\0") == 0){
+			 GPIOC->ODR &= ~(0x000003c0);
 		 }else{
-			UART_Send(invalid);
+			__NOP();
 		 }
 }
 
 void SysTick_Handler(void) {
-    if (counter == 0xffffffff) {
+
+	if (counter == 0xffffffff) {
         counter = 0; // Reset the counter if the maximum value is reached
     } else {
         counter++; // Increment the counter
     }
+	if (timerSet){
+		timeComplete = 0;
+		timeCounter++;
+		if (timeCounter == delayms_time){
+			timeComplete = 1;
+		}
+	}
+
+
 }
 
 void intToString(uint32_t value, char str[]) {
@@ -432,21 +424,25 @@ void UART_Send(char str[]){
 }
 
 
-//void UART_Receive(char str[], char* receivedChar) {
-//    int counter = 0;
-//    int signal = 0;
-//
-//    while (signal == 0) {
-//        if (*receivedChar == '\n' || *receivedChar == '\r' || *receivedChar == '\0' || counter>=5) {
-//        	str[counter] = '\0';
-//            signal = 1;
-//        }else{
-//            str[counter] = *receivedChar;
-//            *receivedChar = '\0';
-//            counter++;
-//        }
-//    }
-//}
+void UART_Receive(char str[], char* receivedChar) {
+    if (rst_msgReady){
+    	msgReady = 0;
+    }
+    int counter = 0;
+    int signal = 0;
+
+    while (signal == 0) {
+        if (*receivedChar == '\n' || *receivedChar == '\r' || *receivedChar == '\0' || counter>=5) {
+        	str[counter] = '\0';
+            signal = 1;
+            msgReady = 1;
+        }else{
+            str[counter] = *receivedChar;
+            *receivedChar = '\0';
+            counter++;
+        }
+    }
+}
 
 void DelayMS(unsigned int time){
 
@@ -455,6 +451,12 @@ void DelayMS(unsigned int time){
 				//Wait for 1 millisec.
 		}
 	}
+
+//	delayms_time = time;
+//	timerSet = 1;
+//	if (timeComplete==1){
+//		timerSet = 0;
+//	}
 }
 
 void SysTick_Init(uint32_t ticks){
