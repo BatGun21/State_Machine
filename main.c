@@ -56,10 +56,7 @@ char invalid[15] = "Invalid Input ";
 int msgReady = 0;
 int rst_msgReady = 0;
 char systickStr[11];
-int timerSet = 0;
-int timeCounter = 0;
-int timeComplete = 0;
-int delayms_time = 0;
+int zeroCounter = 0;
 
 
 /* USER CODE END PV */
@@ -69,8 +66,8 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 void SystemClock_Config(void);
 void SysTick_Init(uint32_t ticks);
-void DelayMS(unsigned int time);
-void UART_Tx(char chat);
+int DelayMS(unsigned int time);
+void UART_Tx(char c);
 char UART_Rx(void);
 void UART_Send(char str[]);
 void UART_Receive(char str[], char* receivedChar);
@@ -102,7 +99,6 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -298,11 +294,9 @@ void LED_Control (char str[]){
 			GPIOC->ODR &= 0xfffffdff; //Green LED off
 		}else if (strcmp(str, "BLINK\0") == 0){
 			//Blinking all the LEDs Together
-			DelayMS(50);
-			GPIOC->ODR ^= 0x000003c0;
-//				if (timerSet==0){
-//					GPIOC->ODR ^= 0x000003c0;
-//				}
+			if (DelayMS(50)){
+				GPIOC->ODR ^= 0x000003c0;
+			}
 
 		 }else if (strcmp(str, "BLKST\0") == 0){
 			 GPIOC->ODR &= ~(0x000003c0);
@@ -318,15 +312,6 @@ void SysTick_Handler(void) {
     } else {
         counter++; // Increment the counter
     }
-	if (timerSet){
-		timeComplete = 0;
-		timeCounter++;
-		if (timeCounter == delayms_time){
-			timeComplete = 1;
-		}
-	}
-
-
 }
 
 void intToString(uint32_t value, char str[]) {
@@ -444,19 +429,17 @@ void UART_Receive(char str[], char* receivedChar) {
     }
 }
 
-void DelayMS(unsigned int time){
+int DelayMS(unsigned int time){
 
-	for(int i=0; i<=time; i++){
-		while ((SysTick->CTRL & 0x00010000) == 0){
-				//Wait for 1 millisec.
-		}
+	if((SysTick->CTRL & 0x00010000) == 0x00010000){
+		zeroCounter++;
 	}
-
-//	delayms_time = time;
-//	timerSet = 1;
-//	if (timeComplete==1){
-//		timerSet = 0;
-//	}
+	if (zeroCounter==time){
+		zeroCounter = 0;
+		return 1;
+	}else{
+		return 0;
+	}
 }
 
 void SysTick_Init(uint32_t ticks){
@@ -464,9 +447,6 @@ void SysTick_Init(uint32_t ticks){
 	SysTick->CTRL = 0; // Disable SysTick
 
 	SysTick->LOAD = ticks-1; // Set Reload Register
-
-	// Setting Interrupt Priority to the highest
-	NVIC_SetPriority(SysTick_IRQn, (1<<__NVIC_PRIO_BITS)-1);
 
 	SysTick->VAL = 0; // Reset the SysTick counter value
 
@@ -476,6 +456,8 @@ void SysTick_Init(uint32_t ticks){
 
 	SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk; // Enable SysTick
 }
+
+
 
 /* USER CODE END 4 */
 
